@@ -656,7 +656,7 @@ initialize_hand <- function(state) {
 #
 # This function is the central state-transition function.
 # After a human action, the server schedules bot_take_turn()
-# with a five-second pause whenever it becomes the bot's turn.
+# with a two-second pause whenever it becomes the bot's turn.
 # ============================================================
 
 execute_action <- function(
@@ -931,7 +931,7 @@ choose_postflop_raise_to <- function(state) {
 # BOT TURN
 # ============================================================
 
-# One bot decision per invocation. The server waits five seconds before
+# One bot decision per invocation. The server waits two seconds before
 # each decision, including a pre-flop fold and consecutive-street actions.
 bot_take_turn <- function(state) {
   if (state$hand_over || is.null(state$to_act) ||
@@ -1204,6 +1204,108 @@ lab_rank_name <- function(rank) {
   LAB_CATEGORY_NAMES[rank[1L] + 1L]
 }
 
+# River-only analysis: compare every legal opponent holding against your
+# actual best five-card hand. Compare complete ranks (including kickers).
+lab_river_rank_label <- function(rank) {
+  # ONE formatter for every hand shown in the River tab, including
+  # your own hand, exact opponent hands, and every possible winning group.
+  # Rank notation is restricted to 23456789TJQKA: no spelled-out ranks.
+  symbols <- c("2", "3", "4", "5", "6", "7", "8", "9", "T", "J", "Q", "K", "A")
+  sym <- function(value) symbols[as.integer(value) - 1L]
+  values <- rank[-1L]
+  values <- values[values > 0L]
+  category <- rank[1L]
+  
+  if (category == 8L) {
+    if (values[1L] == 14L) return("Royal flush")
+    return(sprintf("Straight flush: %s-high", sym(values[1L])))
+  }
+  if (category == 7L)
+    return(sprintf("Quads: %s (%s kicker)", sym(values[1L]), sym(values[2L])))
+  if (category == 6L) {
+    # Concise display convention requested for ALL full houses:
+    # show the two ranks high-to-low, regardless of which rank is trips.
+    # KKK22 and 222KK both DISPLAY as "Full house: K2"; their true
+    # five-card rankings are compared separately before grouping.
+    full_house_ranks <- sort(values[1L:2L], decreasing=TRUE)
+    return(sprintf("Full house: %s%s",
+                   sym(full_house_ranks[1L]), sym(full_house_ranks[2L])))
+  }
+  if (category == 5L)
+    return(sprintf("Flush: %s", paste(sym(values), collapse="")))
+  if (category == 4L)
+    return(sprintf("Straight: %s-high", sym(values[1L])))
+  if (category == 3L)
+    return(sprintf("Triple: %s (%s, %s kickers)",
+                   sym(values[1L]), sym(values[2L]), sym(values[3L])))
+  if (category == 2L)
+    return(sprintf("Two pair: %s%s (%s kicker)",
+                   sym(values[1L]), sym(values[2L]), sym(values[3L])))
+  if (category == 1L)
+    return(sprintf("Pair: %s (%s kickers)",
+                   sym(values[1L]), paste(sym(values[-1L]), collapse=", ")))
+  if (category == 0L)
+    return(sprintf("High card: %s", paste(sym(values), collapse="")))
+  stop("Unknown poker hand category")
+}
+
+lab_river_better_hands <- function(hero, board, style, villain=character(0)) {
+  stopifnot(length(hero) == 2L, length(board) == 5L)
+  mine <- lab_rank(c(hero, board))
+  remaining <- setdiff(LAB_DECK, c(hero, board))
+  exact <- length(villain) == 2L
+  combos <- if (exact) matrix(villain, nrow=2L) else lab_opponent_combos(remaining, style)
+  n <- ncol(combos)
+  if (n == 0L) stop("No opponent hands remain in the selected range.")
+  ranks <- matrix(0L, nrow=6L, ncol=n)
+  comparison <- integer(n)
+  for (i in seq_len(n)) {
+    ranks[, i] <- lab_rank(c(combos[, i], board))
+    comparison[i] <- lab_compare(mine, ranks[, i])
+  }
+  better <- which(comparison < 0L)
+  holes <- vapply(seq_len(n), function(i) {
+    paste(vapply(combos[, i], card_label, character(1)), collapse=" ")
+  }, character(1))
+  groups <- data.frame(hand=character(0), combos=integer(0), examples=character(0),
+                       stringsAsFactors=FALSE)
+  if (length(better)) {
+    # Group by FULL showdown rank, not just "straight"/"flush". Rank ordering
+    # accounts for the actual high cards and kickers within each category.
+    keys <- vapply(better, function(i) paste(ranks[, i], collapse=":"), character(1))
+    split_ix <- split(better, keys)
+    grouped <- lapply(split_ix, function(ix) {
+      r <- ranks[, ix[1L]]
+      list(rank=r, name=lab_river_rank_label(r), indices=ix)
+    })
+    sorting <- do.call(rbind, lapply(grouped, function(g) -g$rank))
+    ord <- do.call(order, as.data.frame(sorting))
+    grouped <- grouped[ord]
+    
+    # Short high-to-low full-house labels deliberately hide which rank is
+    # trips. Merge those labels into ONE row rather than displaying two
+    # identical-looking "Full house: K2" rows with different combo counts.
+    names_by_rank <- vapply(grouped, `[[`, character(1), "name")
+    display_names <- unique(names_by_rank)
+    groups <- do.call(rbind, lapply(display_names, function(label) {
+      match_ix <- which(names_by_rank == label)
+      exact_groups <- grouped[match_ix]
+      combo_ix <- unlist(lapply(exact_groups, `[[`, "indices"), use.names=FALSE)
+      data.frame(
+        hand=label,
+        combos=as.integer(length(combo_ix)),
+        examples=paste(head(unique(holes[combo_ix]), 2L), collapse=" / "),
+        stringsAsFactors=FALSE
+      )
+    }))
+    rownames(groups) <- NULL
+  }
+  list(total=n, better=length(better), tied=sum(comparison == 0L),
+       exact=exact, opponent_label=if (exact) lab_river_rank_label(ranks[, 1L]) else NULL,
+       outcome=if (exact) comparison[1L] else NULL,
+       your_label=lab_river_rank_label(mine), groups=groups)
+}
+
 # Count final BEST-hand categories over every possible board runout.
 # If the opponent's exact cards are known, exclude both blockers.
 lab_exact_runouts <- function(hero, board, villain=character(0)) {
@@ -1343,67 +1445,8 @@ lab_hand_features <- function(hero, board) {
   list(rank=rank, tier=tier, draws=draws)
 }
 
-lab_strategy_text <- function(street, hero, board, pos, facing, pot, bet, eq) {
-  info <- lab_hand_features(hero, board)
-  cat <- info$rank[1L]
-  texture <- lab_texture(board)
-  wet <- grepl("connected|two-tone|three or more", texture)
-  street_note <- switch(street,
-                        "Flop"="Flop: think about range advantage, nut advantage and which turn cards change the board.",
-                        "Turn"="Turn: reassess the turn card and how much of each range continues to the river.",
-                        "River"="River: no draws remain; think in terms of thin value bets, bluff-catchers, and blocker effects.")
-  if (facing == "check") {
-    baseline <- if (cat >= 3L) {
-      if (wet) {
-        "Consider value betting, including larger sizes when worse made hands and draws can continue. Also protect some strong hands in checking ranges."
-      } else {
-        "Consider value betting at a small-to-medium size on this board, while keeping some strong hands in a checking range."
-      }
-    } else if (cat == 2L || cat == 1L) {
-      "Checking can protect medium-strength hands and avoid inflating the pot; smaller value/protection bets may also fit some ranges."
-    } else if (length(info$draws) > 0L) {
-      "A draw may sometimes be semi-bluffed and sometimes checked. Consider fold equity, board coverage, and whether your draw has showdown value."
-    } else {
-      "Check often with unmade holdings. Selective bluffs need appropriate blockers, range advantage, and credible value hands."
-    }
-  } else {
-    baseline <- if (cat >= 3L) {
-      "Strong made hands can often continue, but the exact mix of calling and raising depends on board, sizing, and the opponent's value range."
-    } else if (cat >= 1L) {
-      "Compare the opponent's represented range to your made hand; some pairs bluff-catch, while vulnerable pairs may fold to larger bets."
-    } else if (length(info$draws) > 0L) {
-      "Compare your draw equity and implied odds to the price. Some draws can call or semi-bluff; avoid assuming every visible draw has clean winning outs."
-    } else {
-      "An unmade hand generally needs credible bluff-catching value or a carefully selected bluff-raise; folding is often relevant."
-    }
-  }
-  pos_text <- if (pos == "ip") {
-    "You are in position post-flop: you observe the opponent's action first."
-  } else {
-    "You are out of position post-flop: consider protecting your checking range."
-  }
-  if (facing == "bet" && bet > 0L) {
-    pot_odds <- bet/(pot+2*bet)
-    mdf <- pot/(pot+bet)
-    comparison <- if (eq >= pot_odds) {
-      "Modeled showdown equity is above the raw pot-odds threshold."
-    } else {
-      "Modeled showdown equity is below the raw pot-odds threshold."
-    }
-    math <- sprintf("Facing $%d into a $%d pre-bet pot: call threshold %.1f%%; minimum defense frequency %.1f%% (range-level concept). %s This alone does NOT identify the GTO action or account for later betting.",
-                    round(bet), round(pot), 100*pot_odds, 100*mdf, comparison)
-  } else {
-    sizes <- pmin(round(pot * c(.25,1/3,.5,.75,1)), 999999L)
-    math <- sprintf("Illustrative sizes for a $%d pot: quarter $%d · third $%d · half $%d · three-quarter $%d · pot $%d. These are options, not solver frequencies.",
-                    round(pot), sizes[1],sizes[2],sizes[3],sizes[4],sizes[5])
-  }
-  draws <- if (length(info$draws)) paste(info$draws,collapse="; ") else "none detected"
-  list(street=street_note, baseline=baseline, position=pos_text,
-       math=math, feature=sprintf("%s · %s · Draw indicators: %s",lab_rank_name(info$rank),texture,draws))
-}
-
-# Clear beginner-facing prompts. These are study prompts, not solver actions.
-lab_beginner_guidance <- function(street, hero, board, facing, pos) {
+# Spot-specific decision prompts. These are teaching cues, not solver actions.
+lab_beginner_guidance <- function(hero, board, facing) {
   info <- lab_hand_features(hero, board)
   category <- info$rank[1L]
   has_draw <- length(info$draws) > 0L
@@ -1465,16 +1508,6 @@ lab_beginner_guidance <- function(street, hero, board, facing, pos) {
       )
     }
   }
-  street_tip <- switch(street,
-                       "Flop"="Two more community cards can come. Think about which turn cards help you or your opponent.",
-                       "Turn"="Just one card remains. Ask which river cards could change who is ahead.",
-                       "River"="There are no more cards to come. Focus on what weaker hands might call or stronger hands might fold."
-  )
-  position_tip <- if (pos == "ip") {
-    "You are in position: you act after your opponent, so you get to see their action first."
-  } else {
-    "You are out of position: you usually act first on each street. Checking sometimes lets you see how your opponent responds before putting in more money."
-  }
   board_terms <- strsplit(lab_texture(board), ", ", fixed=TRUE)[[1L]]
   replacements <- c(
     "paired"="paired",
@@ -1489,8 +1522,7 @@ lab_beginner_guidance <- function(street, hero, board, facing, pos) {
     draw_easy <- c(draw_easy, "flush draw")
   if ("one-card straight possibility" %in% info$draws)
     draw_easy <- c(draw_easy, "possible straight draw")
-  list(headline=headline, explanation=explanation, street_tip=street_tip,
-       position_tip=position_tip, board=board_easy,
+  list(headline=headline, explanation=explanation, board=board_easy,
        draws=if (length(draw_easy)) paste(draw_easy,collapse=" + ") else "None detected")
 }
 
@@ -1528,12 +1560,13 @@ lab_street_tab <- function(street, n_board, prefix) {
            fluidPage(class="preflop-page",
                      div(class="preflop-card",
                          h3(paste0("♠ ",street," Strategy & Equity Lab")),
-                         p("Pick your cards, then see which hands you could make by the river and ",
-                           "estimate your chance of winning vs. one opponent."),
-                         div(class="preflop-note",
-                             strong("Strategy accuracy: "),
-                             "The probabilities are calculated, but the betting advice is educational ",
-                             "and GTO-inspired, not a solver's exact answer.")),
+                         p(if (street == "River")
+                           "Choose your cards to see the exact opponent holdings that beat you."
+                           else "Choose your cards to calculate hand probabilities and showdown equity."),
+                         tags$details(class="lab-more-details",
+                                      tags$summary("Model assumptions & limitations"),
+                                      p("Equity assumes a showdown without future betting. Opponent ranges are ",
+                                        "heuristic, and strategic notes are not solver-generated GTO actions."))),
                      fluidRow(
                        column(4,
                               div(class="preflop-card",
@@ -1589,40 +1622,18 @@ lab_street_tab <- function(street, n_board, prefix) {
                        ),
                        column(8,
                               div(class="preflop-card",
-                                  h4("3 · Equity and exact hand probabilities"),
+                                  h4(if (street == "River") "3 · Showdown equity"
+                                     else "3 · Equity & hand probabilities"),
                                   uiOutput(paste0(prefix,"_results")),
-                                  plotOutput(paste0(prefix,"_distribution"),height="295px")
+                                  if (street != "River")
+                                    plotOutput(paste0(prefix,"_distribution"),height="295px")
                               ),
                               div(class="preflop-card",
-                                  h4("4 · Post-flop strategy"),
+                                  h4(if (street == "River") "4 · River decision & hands that beat you"
+                                     else "4 · Your decision"),
                                   uiOutput(paste0(prefix,"_strategy"))
                               )
                        )
-                     ),
-                     div(class="preflop-card",
-                         h4(paste0(street," · Opponent adjustments & alternatives")),
-                         p(switch(street,
-                                  "Flop"="Start by asking who is more likely to have connected with these three cards. Both players can have strong hands, weak hands, and draws.",
-                                  "Turn"="Reassess your hand after the fourth card. One more community card can change everything, so think about your river plan.",
-                                  "River"="Your hand cannot improve now. Your choice comes down to whether a weaker hand calls a bet, a stronger hand folds, or you want to reach showdown.")),
-                         fluidRow(
-                           column(4,div(class="lab-alt-card",
-                                        h5("GTO-inspired baseline"),
-                                        p("Mix betting and checking so your actions do not always reveal how strong your hand is."))),
-                           column(4,div(class="lab-alt-card",
-                                        h5("vs. a passive opponent"),
-                                        p("Against a calling station, value bet strong and some medium-strength hands when worse hands will call. Reduce low-equity bluffs because passive opponents tend to fold less often."))),
-                           column(4,div(class="lab-alt-card",
-                                        h5("vs. an aggressive opponent"),
-                                        p("Against a frequent bluffer, defend with suitable bluff-catchers instead of folding automatically to pressure. You can trap with some strong hands; consider blockers and bet sizing when choosing a call or raise.")))
-                         ),
-                         tags$details(class="lab-more-details",
-                                      tags$summary("Important terms and limitations"),
-                                      p(strong("Range:")," the different hands an opponent might have, not just one guessed hand."),
-                                      p(strong("Value bet:")," a bet you hope a weaker hand will call."),
-                                      p(strong("Bluff:")," a bet you hope a stronger hand will fold to."),
-                                      p("The percentages assume a showdown without future betting. They do not account for folds, future bets, rake, or exact GTO strategy. A card that improves your hand does not necessarily give you the winning hand.")
-                         )
                      )
            )
   )
@@ -1950,6 +1961,11 @@ ui <- navbarPage(
         gap: 8px;
         margin: 10px 0;
       }
+      .lab-threat-scroll { max-height: 440px; overflow: auto; margin: 8px 0 12px; }
+      .lab-threat-table { margin: 0; font-size: 13px; }
+      .lab-threat-table thead th { position: sticky; top: 0; background: #edf5f0; z-index: 1; }
+      .lab-threat-table th { white-space: nowrap; }
+      .lab-threat-table td:first-child { font-weight: 650; }
       .lab-size-chip {
         flex: 1 0 104px;
         text-align: center;
@@ -1970,16 +1986,6 @@ ui <- navbarPage(
       .lab-more-details { border-top: 1px solid #e3e7eb; padding: 12px 0 3px; }
       .lab-more-details summary { cursor: pointer; font-weight: 750; color: #285f52; }
       .lab-more-details p { margin-top: 10px; line-height: 1.5; }
-      .lab-alt-card {
-        padding: 13px;
-        border: 1px solid #e3e7eb;
-        background: #fafcfd;
-        border-radius: 8px;
-        margin-bottom: 12px;
-        min-height: 140px;
-      }
-      .lab-alt-card h5 { font-weight: 800; margin: 0 0 7px; }
-      .lab-alt-card p { margin: 0; }
       @media (max-width: 991px) {
         .lab-card-grid { grid-template-columns: repeat(auto-fit, minmax(100px, 1fr)); }
       }
@@ -2274,7 +2280,7 @@ server <- function(input, output, session) {
   # BOT THINKING TIMER
   # ==========================================================
   # later runs the callback without freezing the Shiny session. Each
-  # decision receives its own five-second pause, even after a street
+  # decision receives its own two-second pause, even after a street
   # transition when the bot also acts first on the next street.
   bot_turn_pending <- FALSE
   bot_turn_token <- 0L
@@ -2316,7 +2322,7 @@ server <- function(input, output, session) {
           if (!identical(this_token, reveal_token) ||
               !identical(this_hand, state$hand_number)) return(invisible(NULL))
           reveal_in_progress(FALSE)
-          # If the bot acts first on the new street, its five-second
+          # If the bot acts first on the new street, its two-second
           # thinking timer begins AFTER the community cards appear.
           if (!isTRUE(state$hand_over) && identical(state$to_act, BOT)) {
             schedule_bot_turn()
@@ -2388,7 +2394,7 @@ server <- function(input, output, session) {
             }
           })
         })
-      }, delay = 5)
+      }, delay = 2)
       invisible(TRUE)
     })
   }
@@ -2427,7 +2433,7 @@ server <- function(input, output, session) {
   # HUMAN ACTION HANDLER
   #
   # Every human action ends here. If it becomes the bot's turn,
-  # show the ACTION badge and schedule its decision in five seconds.
+  # show the ACTION badge and schedule its decision in two seconds.
   # ==========================================================
   
   handle_human_action <- function(
@@ -2598,7 +2604,9 @@ server <- function(input, output, session) {
         dist <- lab_exact_runouts(x$hero,x$board,x$opp)
         improved <- lab_immediate_improvement(x$hero,x$board,x$opp)
         eq <- lab_equity(x$hero,x$board,x$style,x$opp,x$n)
-        list(input=x, dist=dist, improved=improved, equity=eq,
+        threats <- if (identical(prefix, "river"))
+          lab_river_better_hands(x$hero, x$board, x$style, x$opp) else NULL
+        list(input=x, dist=dist, improved=improved, equity=eq, threats=threats,
              hand=lab_hand_features(x$hero,x$board))
       },error=function(e) list(error=paste("Calculation error:",conditionMessage(e))))
     },ignoreInit=TRUE)
@@ -2615,20 +2623,20 @@ server <- function(input, output, session) {
         paste0("Monte Carlo percentages fluctuate with each run. ",
                "Run more trials for greater precision.")
       next_info <- if (is.null(r$improved)) {
-        "River: no cards remain to be dealt."
+        NULL
       } else {
         sprintf("Next-card category improvement: %d of %d unseen cards (%s). This is NOT the number of clean winning outs.",
                 r$improved$n,r$improved$total,fmt(r$improved$p))
       }
-      card_odds <- tags$div(
-        tags$b("Exact river hand-category probabilities"),
-        tags$p(sprintf("One pair: %s | Two pair: %s | Trips: %s | Straight: %s",
-                       fmt(d[2]),fmt(d[3]),fmt(d[4]),fmt(d[5]))),
-        tags$p(sprintf("Flush: %s | Full house: %s | Quads: %s | Straight flush: %s",
-                       fmt(d[6]),fmt(d[7]),fmt(d[8]),fmt(d[9]))),
-        tags$p(sprintf("Best hand is a straight/straight flush: %s · Flush/straight flush: %s",
-                       fmt(d[5]+d[9]),fmt(d[6]+d[9]))),
-        tags$p(sprintf("Full house or higher (hand ranking): %s",fmt(sum(d[7:9]))))
+      card_odds <- tags$details(class="lab-more-details",
+                                tags$summary("Exact hand-category breakdown"),
+                                tags$p(sprintf("One pair: %s | Two pair: %s | Trips: %s | Straight: %s",
+                                               fmt(d[2]),fmt(d[3]),fmt(d[4]),fmt(d[5]))),
+                                tags$p(sprintf("Flush: %s | Full house: %s | Quads: %s | Straight flush: %s",
+                                               fmt(d[6]),fmt(d[7]),fmt(d[8]),fmt(d[9]))),
+                                tags$p(sprintf("Best hand is a straight/straight flush: %s · Flush/straight flush: %s",
+                                               fmt(d[5]+d[9]),fmt(d[6]+d[9]))),
+                                tags$p(sprintf("Full house or higher (hand ranking): %s",fmt(sum(d[7:9]))))
       )
       div(
         div(style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px;",
@@ -2645,15 +2653,11 @@ server <- function(input, output, session) {
         p(strong(uncertainty),sprintf("across %s legal %s.",
                                       format(e$n,big.mark=","),
                                       if (e$exact) "outcomes" else "trials")),
-        p(strong("Current made hand: "),lab_rank_name(r$hand$rank)),
-        p(next_info),
-        card_odds,
+        if (prefix != "river") p(strong("Current made hand: "), lab_rank_name(r$hand$rank)),
+        if (prefix != "river") p(next_info),
+        if (prefix != "river") card_odds,
         if (!is.null(extra)) tags$small(extra),
-        tags$hr(),
-        tags$small("Hand-category probabilities count your BEST five-card hand at the river; ",
-                   "the straight-flush category includes royal flushes. ",
-                   "For heuristic ranges, runout distribution ignores unknown opponent blockers; ",
-                   "an exact opponent hand is accounted for.")
+        NULL
       )
     })
     output[[paste0(prefix,"_distribution")]] <- renderPlot({
@@ -2671,10 +2675,7 @@ server <- function(input, output, session) {
       req(!is.null(r))
       if (!is.null(r$error)) return(NULL)
       x <- r$input
-      street_name <- switch(prefix,flop="Flop",turn="Turn",river="River")
-      st <- lab_strategy_text(street_name,x$hero,x$board,x$pos,
-                              x$facing,x$pot,x$bet,r$equity$equity)
-      easy <- lab_beginner_guidance(street_name,x$hero,x$board, x$facing,x$pos)
+      easy <- lab_beginner_guidance(x$hero,x$board,x$facing)
       fmt_money <- function(z) paste0("$",format(round(z),big.mark=","))
       
       # Dollar examples use the pot and effective stack entered in
@@ -2707,34 +2708,75 @@ server <- function(input, output, session) {
                                   100*r$equity$equity)),
                         tags$small("Important: an opponent who bets may have a different set of hands than the initial range you selected. This comparison does NOT tell you automatically to call or fold."))
       }
+      river_ui <- NULL
+      if (identical(prefix, "river")) {
+        t <- r$threats
+        if (isTRUE(t$exact)) {
+          result <- if (t$outcome < 0L) "OPPONENT WINS" else if (t$outcome > 0L) "YOU WIN" else "TIE"
+          river_ui <- div(class="lab-math-card",
+                          h5("Exact opponent hand"),
+                          p(strong("Your final hand: "), t$your_label),
+                          p(strong("Opponent's final hand: "), t$opponent_label),
+                          div(class="lab-odds-number", result))
+        } else {
+          threat_table <- function(data) {
+            tags$div(class="lab-threat-scroll",
+                     tags$table(class="table table-striped table-condensed lab-threat-table",
+                                tags$thead(tags$tr(tags$th("Winning hand"), tags$th("Combos"),
+                                                   tags$th("Example opponent cards"))),
+                                tags$tbody(lapply(seq_len(nrow(data)), function(i) {
+                                  tags$tr(
+                                    tags$td(
+                                      title=if (startsWith(data$hand[i], "Full house:")) {
+                                        "The two ranks are high-to-low (e.g., K2); this label merges both trip arrangements. Each combo is ranked exactly."
+                                      } else { NULL },
+                                      data$hand[i]),
+                                    tags$td(data$combos[i]),
+                                    tags$td(data$examples[i]))
+                                }))))
+          }
+          river_ui <- div(class="lab-math-card",
+                          h5("Opponent hands that beat yours"),
+                          p(strong("Your final hand: "), t$your_label),
+                          p(sprintf("%s of %s legal opponent combos beat your hand in the selected range.",
+                                    format(t$better,big.mark=","), format(t$total,big.mark=","))),
+                          if (t$better == 0L) {
+                            p("No possible opponent holding in this range beats you.")
+                          } else {
+                            threat_table(t$groups)
+                          },
+                          tags$small("Possible holdings, not a prediction of what your opponent would bet. ",
+                                     "Full-house labels use high-to-low ranks; showdown comparisons use exact five-card strengths."))
+        }
+      }
       div(
         div(class="lab-summary-callout",
-            div(class="lab-eyebrow","Start here · Strategic consideration"),
+            div(class="lab-eyebrow","Your current situation"),
             h4(easy$headline),
             p(easy$explanation)),
+        river_ui,
         div(class="lab-guide-grid",
             div(class="lab-guide-box",
-                h5("1. Hand strength & board texture"),
-                p(strong("Current best hand: "),lab_rank_name(r$hand$rank)),
-                p(strong("Board texture: "),easy$board),
-                p(strong("Draws: "),easy$draws)),
+                h5("Your cards & board"),
+                if (prefix != "river") p(strong("Made hand: "),lab_rank_name(r$hand$rank)),
+                p(strong("Board: "), easy$board),
+                if (prefix != "river" && easy$draws != "None detected")
+                  p(strong("Draws: "), easy$draws)),
             div(class="lab-guide-box",
-                h5("2. Position & street plan"),
-                p(easy$street_tip),
-                p(easy$position_tip))
+                h5("This spot"),
+                p(strong("Position: "), if (x$pos == "ip") "In position" else "Out of position"),
+                p(strong("Opponent range: "), switch(x$style,
+                                                     random="Any two cards", tight="Tight heuristic",
+                                                     loose="Wide heuristic", exact="Exact hand")),
+                if (prefix == "flop") p("Two community cards remain.")
+                else if (prefix == "turn") p("One community card remains."))
         ),
         sizes_ui,
-        tags$details(class="lab-more-details",
-                     tags$summary("More strategy detail (optional)"),
-                     p(strong("GTO-inspired reasoning: "),st$baseline),
-                     p(strong("Why this street matters: "),st$street),
-                     if (x$facing == "bet") {
-                       p(sprintf("Advanced: minimum defense frequency for a %s bet into a %s pot is %.1f%%. This is about your ENTIRE range, not a requirement to call with this exact hand.",
-                                 fmt_money(x$bet),fmt_money(x$pot),100*mdf))
-                     } else {
-                       p("A balanced strategy sometimes checks strong hands and sometimes bets draws; exact frequencies depend on both players' ranges and bet sizes.")
-                     },
-                     p(strong("Reminder: "),"These are study prompts, not solver-calculated GTO actions or frequencies."))
+        if (x$facing == "bet") tags$details(class="lab-more-details",
+                                            tags$summary("Advanced: minimum defense frequency"),
+                                            p(sprintf("For this bet size: %.1f%% of your TOTAL range. This is a ",
+                                                      100*mdf),
+                                              "range-level benchmark—not a requirement to call with these cards."))
       )
     })
   })
