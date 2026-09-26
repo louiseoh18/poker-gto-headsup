@@ -1052,6 +1052,13 @@ make_preflop_matrix <- function(position) {
 
 SB_PRE_FLOP <- make_preflop_matrix("SB")
 BB_PRE_FLOP <- make_preflop_matrix("BB")
+
+preflop_legend_item <- function(css_class, label) {
+  span(class = "legend-item",
+       span(class = paste("legend-swatch", css_class), `aria-hidden` = "true"),
+       span(label))
+}
+
 preflop_chart_html <- function(mat) {
   ranks <- rownames(mat)
   header <- paste0("<tr><th></th>", paste0("<th>", ranks, "</th>", collapse = ""), "</tr>")
@@ -1070,7 +1077,26 @@ preflop_chart_html <- function(mat) {
             "M" = "pf-mix",
             "F" = "pf-fold"
           )
-          paste0("<td class='", class_name, "'>", action, "</td>")
+          action_label <- switch(
+            action,
+            "R" = "Open / Raise",
+            "3B" = "3-Bet",
+            "C" = "Call / Defend",
+            "M" = "Mix / Frequency-dependent",
+            "F" = "Fold"
+          )
+          # Upper-right: suited; lower-left: offsuit; diagonal: pairs.
+          # Always put the higher rank first (98s / 98o, not 89s / 89o).
+          hand <- if (i == j) {
+            paste0(ranks[i], ranks[i])
+          } else if (i < j) {
+            paste0(ranks[i], ranks[j], "s")
+          } else {
+            paste0(ranks[j], ranks[i], "o")
+          }
+          hand_type <- if (i == j) "pocket pair" else if (i < j) "suited" else "offsuit"
+          paste0("<td class='", class_name, "' title='", hand, " (", hand_type,
+                 "): ", action_label, "'>", hand, "</td>")
         },
         character(1)
       )
@@ -1801,12 +1827,13 @@ ui <- navbarPage(
         padding: 5px;
       }
       .preflop-grid td {
-        width: 39px;
-        height: 33px;
+        width: 42px;
+        height: 35px;
         text-align: center;
-        font-size: 11px;
+        font-size: 12px;
         font-weight: 900;
         border-radius: 3px;
+        cursor: help;
       }
       .pf-open {
         background: #b9e8c1;
@@ -1830,11 +1857,30 @@ ui <- navbarPage(
       }
       .preflop-legend {
         display: flex;
-        gap: 12px;
+        gap: 8px 14px;
         flex-wrap: wrap;
         margin-top: 12px;
         font-size: 12px;
-        font-weight: 600;
+        font-weight: 650;
+      }
+      .preflop-legend .legend-item {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+      }
+      .preflop-legend .legend-swatch {
+        display: inline-block;
+        width: 17px;
+        height: 17px;
+        border: 1px solid rgba(0, 0, 0, 0.13);
+        border-radius: 4px;
+        flex-shrink: 0;
+      }
+      .preflop-chart-note {
+        margin: 8px 0 0;
+        color: #4b5563;
+        font-size: 12px;
+        line-height: 1.5;
       }
       .preflop-note {
         background: #fff8e6;
@@ -1949,9 +1995,9 @@ ui <- navbarPage(
     fluidPage(
       div(
         class = "title-panel",
-        h2("♠ Practice Game", style = "margin-top:0;"),
-        p(
-          "Heads-up No-Limit Poker vs. a randomized GTO-inspired bot",
+        h2("♠ Heads-up vs. a GTO-Inspired Bot", 
+           style = "margin-top:0;"),
+        p("Stop trying to exploit the bot. This is where degens learn some probability.",
           style = "margin-bottom:0;"
         )
       ),
@@ -2100,12 +2146,13 @@ ui <- navbarPage(
               "The SB is first to act pre-flop. In heads-up play, the button can open a very wide range."
             ),
             div(class = "preflop-scroll", preflop_chart_html(SB_PRE_FLOP)),
-            div(
-              class = "preflop-legend",
-              span("R = Open / Raise"),
-              span("M = Mix / Frequency-dependent"),
-              span("F = Fold")
-            )
+            div(class = "preflop-legend",
+                preflop_legend_item("pf-open", "Open / Raise"),
+                preflop_legend_item("pf-mix", "Mix / Frequency-dependent"),
+                preflop_legend_item("pf-fold", "Fold")),
+            p(class = "preflop-chart-note",
+              "Above diagonal: suited (98s) · Below diagonal: offsuit (98o) · ",
+              "Diagonal: pocket pairs (99). Hover over a hand to see its action.")
           )
         ),
         column(
@@ -2118,13 +2165,14 @@ ui <- navbarPage(
               "so calling ranges can be quite wide. Stronger holdings can also be used for 3-bets."
             ),
             div(class = "preflop-scroll", preflop_chart_html(BB_PRE_FLOP)),
-            div(
-              class = "preflop-legend",
-              span("3B = 3-Bet"),
-              span("C = Call / Defend"),
-              span("M = Mix"),
-              span("F = Fold")
-            )
+            div(class = "preflop-legend",
+                preflop_legend_item("pf-3bet", "3-Bet"),
+                preflop_legend_item("pf-call", "Call / Defend"),
+                preflop_legend_item("pf-mix", "Mix"),
+                preflop_legend_item("pf-fold", "Fold")),
+            p(class = "preflop-chart-note",
+              "Above diagonal: suited (98s) · Below diagonal: offsuit (98o) · ",
+              "Diagonal: pocket pairs (99). Hover over a hand to see its action.")
           )
         )
       ),
