@@ -1646,6 +1646,18 @@ lab_street_tab <- function(street, n_board, prefix) {
 ui <- navbarPage(
   title = "Texas Hold'em: Heads-Up",
   header = tags$head(
+    # Keep the creator credit opposite the app title across all tabs.
+    # A small DOM insert places it in Shiny's navbar, not a single tab.
+    tags$script(HTML("
+      document.addEventListener('DOMContentLoaded', function() {
+        var navbar = document.querySelector('.navbar > .container-fluid, .navbar > .container');
+        if (!navbar || navbar.querySelector('.poker-creator-credit')) return;
+        var credit = document.createElement('span');
+        credit.className = 'poker-creator-credit';
+        credit.textContent = 'Created by Louise Oh (2024)';
+        navbar.appendChild(credit);
+      });
+    ")),
     tags$script(HTML("
       Shiny.addCustomMessageHandler('poker_action_controls', function(msg) {
         ['fold', 'check', 'call', 'raise', 'raise_amount'].forEach(function(id) {
@@ -1657,6 +1669,27 @@ ui <- navbarPage(
     tags$style(HTML("
       body {
         background-color: #f5f7fa;
+      }
+      /* Subtle attribution at the far-right end of the main navbar. */
+      .poker-creator-credit {
+        float: right;
+        padding: 15px 0;
+        margin-left: 18px;
+        color: #777;
+        font-size: 12px;
+        font-weight: 600;
+        line-height: 20px;
+        white-space: nowrap;
+      }
+      @media (max-width: 767px) {
+        .poker-creator-credit {
+          float: none;
+          display: block;
+          clear: both;
+          text-align: right;
+          padding: 0 14px 8px;
+          margin-left: 0;
+        }
       }
       .title-panel {
         background: #202938;
@@ -2125,7 +2158,7 @@ ui <- navbarPage(
       class = "preflop-page",
       div(
         class = "preflop-card",
-        h3("Heads-Up Pre-Flop Strategy"),
+        h3("♠ Heads-Up Pre-Flop Strategy"),
         p(
           "In heads-up No-Limit Hold'em, the button is also the Small Blind. ",
           "The SB/button acts first before the flop and last on every post-flop street."
