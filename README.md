@@ -1,19 +1,19 @@
-# Texas Hold'em Heads-Up Simulator & Strategy App
+# Poker Heads-Up Simulator & Strategy App
+
+App: https://louiseoh18.shinyapps.io/poker-gto-headsup/
 
 ## Why I Built This
 
-I wanted to play poker for fun without going to a casino, so I recruited my 
-cousin. Since she was my only opponent, heads-up poker it was. Unfortunately, 
-she only knew the basic rules and would somehow go all-in with 72o but fold AKs 
-pre-flop. Playing against her was essentially playing against a random number 
-generator.
+I wanted to play hold'em without going to a casino/tournament, so I recruited my 
+cousin. Unfortunately, she only knew the basic rules and would often play roulette -- 
+go all-in with 72o but fold AKs pre-flop. 
 
-I built this app for both of us, but mostly for her, to get a better feel for 
+I built this app for both of us (mostly for her) to get a better feel for 
 when to raise, call, check, or fold, and understand the probabilities behind 
-those decisions.
+those decisions. It's always just the two of us, so I just made a heads-up version.
 
-Hopefully, our future games will involve a little more strategy and a lot less 
-gambling..... :P
+Hopefully, our future games will involve a little more strategy and a little less 
+gambling... ;)
 
 ## App Overview
 

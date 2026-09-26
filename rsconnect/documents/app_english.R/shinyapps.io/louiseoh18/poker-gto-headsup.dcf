@@ -1,0 +1,13 @@
+name: poker-gto-headsup
+title: poker-gto-headsup
+username: louiseoh18
+account: louiseoh18
+server: shinyapps.io
+hostUrl: https://api.shinyapps.io/v1
+appId: 18018220
+bundleId: 12607832
+url: https://louiseoh18.shinyapps.io/poker-gto-headsup/
+version: 1
+asMultiple: FALSE
+asStatic: FALSE
+ignoredFiles: app_korean.R
