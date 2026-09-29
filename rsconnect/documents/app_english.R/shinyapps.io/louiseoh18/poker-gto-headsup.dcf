@@ -5,7 +5,7 @@ account: louiseoh18
 server: shinyapps.io
 hostUrl: https://api.shinyapps.io/v1
 appId: 18018220
-bundleId: 12614254
+bundleId: 12614260
 url: https://louiseoh18.shinyapps.io/poker-gto-headsup/
 version: 1
 asMultiple: FALSE
